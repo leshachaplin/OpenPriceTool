@@ -22,7 +22,7 @@ func main() {
 
 	username := "lesha"
 	symbol := "USDUAH"
-	stoppLoss := float64(10000)
+	stoppLoss := float64(210)
 
 	opts := grpc.WithInsecure()
 	clientConnInterface, err := grpc.Dial("0.0.0.0:50051", opts)
@@ -73,9 +73,9 @@ func main() {
 		log.Error(err)
 	}
 
-	repo := make(map[string]model.Price, 0)
+	ch := make(chan model.Price)
 
-	go func(ctx context.Context, r map[string]model.Price, str protocol.TraderService_ReadPriceClient) {
+	go func(ctx context.Context, c chan model.Price, str protocol.TraderService_ReadPriceClient) {
 		for {
 			select {
 			case <-ctx.Done():
@@ -97,6 +97,7 @@ func main() {
 					}
 
 					res := model.Price{
+						ID:       in.Price.PriceId,
 						Bid:      in.Price.Bid,
 						Ask:      in.Price.Ack,
 						Date:     time.Unix(in.Price.Date, 0),
@@ -104,13 +105,13 @@ func main() {
 						Currency: in.Price.Currency,
 					}
 
-					r[res.Symbol] = res
+					c <- res
 				}
 			}
 		}
-	}(done, repo, stream)
+	}(done, ch, stream)
 
-	val := repo[symbol]
+	val := <-ch
 
 	stopLoss := &protocol.StopLossValue{
 		Value:    stoppLoss,
@@ -120,7 +121,7 @@ func main() {
 	posReq := &protocol.OpenPositionRequest{
 		Username: username,
 		Symbol:   symbol,
-		Short:    false,
+		Short:    true,
 		Amount:   10,
 		PriceId:  val.ID,
 		Value:    stopLoss,
