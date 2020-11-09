@@ -92,7 +92,7 @@ func OpenPosition(ctx context.Context,
 	val := <-ch
 
 	stopLoss := &protocol.StopLossValue{
-		Value:    stoppLoss,
+		Value:    val.GetPrice(true) + 40,
 		IsEnable: true,
 	}
 
@@ -112,12 +112,10 @@ func OpenPosition(ctx context.Context,
 }
 
 func main() {
-	s := make(chan os.Signal)
 	done, cnsl := context.WithCancel(context.Background())
 
 	username := "lesha"
 	symbol := "EURUSD"
-	stoppLoss := float64(150)
 
 	opts := grpc.WithInsecure()
 	clientConnInterface, err := grpc.Dial("0.0.0.0:50051", opts)
@@ -145,23 +143,26 @@ func main() {
 		DB:   0,
 	})
 
-	OpenPosition(done, redisClient, client, symbol, username)
-
 	c := make(chan os.Signal, 0)
 	signal.Notify(c, os.Interrupt)
-
-	<-s
-	close(s)
-	cnsl()
 
 	<-c
 	cnsl()
 
-	if err := redisClient.Close(); err != nil {
-		log.Errorf("redis not closed %s", err)
-	}
+	for {
+		select {
+		case <-done.Done():
+			{
+				if err := redisClient.Close(); err != nil {
+					log.Errorf("redis not closed %s", err)
+				}
 
-	log.Info("Cancel is successful")
-	close(c)
-	return
+				log.Info("Cancel is successful")
+				close(c)
+				return
+			}
+		default:
+			OpenPosition(done, redisClient, client, symbol, username)
+		}
+	}
 }
