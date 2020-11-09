@@ -16,13 +16,108 @@ import (
 	"time"
 )
 
+func ReadPrice(ctx context.Context, price *model.Price, c chan model.Price,
+	client protocol.TraderServiceClient) {
+	go func(ctx context.Context, pr *model.Price,
+		priceChannel chan model.Price, cli protocol.TraderServiceClient) {
+
+		req := &protocol.ReadPriceRequest{
+			Symbols: []string{
+				price.Symbol,
+				price.ID},
+		}
+
+		stream, err := cli.ReadPrice(context.Background(), req)
+		if err != nil {
+			log.Error(err)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				{
+					err := stream.CloseSend()
+					if err != nil {
+						log.Error(err)
+					}
+				}
+			default:
+				{
+					in, err := stream.Recv()
+					if err == io.EOF {
+						continue
+					}
+					if err != nil {
+						log.Error(err)
+						//TODO Reconnect
+					}
+
+					res := model.Price{
+						ID:       in.Price.PriceId,
+						Bid:      in.Price.Bid,
+						Ask:      in.Price.Ack,
+						Date:     time.Unix(in.Price.Date, 0),
+						Symbol:   in.Price.Symbol,
+						Currency: in.Price.Currency,
+					}
+
+					priceChannel <- res
+				}
+			}
+		}
+
+	}(ctx, price, c, client)
+}
+
+func OpenPosition(ctx context.Context,
+	redisCli redis.UniversalClient,
+	client protocol.TraderServiceClient,
+	symbol, username string) {
+	price := &model.Price{}
+	key := fmt.Sprintf("%s_last", symbol)
+	result, err := redisCli.Get(key).Bytes()
+	if err != nil {
+		log.Error("error in get from redis last id ", err)
+	}
+
+	price, err = price.UnmarshalBinary(result)
+	if err != nil {
+		log.Error("error in unmarshalling binary in get last id's ", err)
+	}
+
+	ch := make(chan model.Price)
+
+	ReadPrice(ctx, price, ch, client)
+
+	val := <-ch
+
+	stopLoss := &protocol.StopLossValue{
+		Value:    stoppLoss,
+		IsEnable: true,
+	}
+
+	posReq := &protocol.OpenPositionRequest{
+		Username: username,
+		Symbol:   symbol,
+		Short:    true,
+		Amount:   10,
+		PriceId:  val.ID,
+		Value:    stopLoss,
+	}
+
+	_, err = client.OpenPosition(context.Background(), posReq)
+	if err != nil {
+		log.Error(err)
+	}
+}
+
 func main() {
 	s := make(chan os.Signal)
 	done, cnsl := context.WithCancel(context.Background())
 
 	username := "lesha"
-	symbol := "USDUAH"
-	stoppLoss := float64(210)
+	symbol := "EURUSD"
+	stoppLoss := float64(150)
 
 	opts := grpc.WithInsecure()
 	clientConnInterface, err := grpc.Dial("0.0.0.0:50051", opts)
@@ -50,95 +145,7 @@ func main() {
 		DB:   0,
 	})
 
-	price := &model.Price{}
-	key := fmt.Sprintf("%s_last", symbol)
-	result, err := redisClient.Get(key).Bytes()
-	if err != nil {
-		log.Error("error in get from redis last id ", err)
-	}
-
-	price, err = price.UnmarshalBinary(result)
-	if err != nil {
-		log.Error("error in unmarshalling binary in get last id's ", err)
-	}
-
-	req := &protocol.ReadPriceRequest{
-		Symbols: []string{
-			symbol,
-			price.ID},
-	}
-
-	stream, err := client.ReadPrice(context.Background(), req)
-	if err != nil {
-		log.Error(err)
-	}
-
-	ch := make(chan model.Price)
-
-	go func(ctx context.Context, c chan model.Price, str protocol.TraderService_ReadPriceClient) {
-		for {
-			select {
-			case <-ctx.Done():
-				{
-					err := stream.CloseSend()
-					if err != nil {
-						log.Error(err)
-					}
-				}
-			default:
-				{
-					in, err := str.Recv()
-					if err == io.EOF {
-						continue
-					}
-					if err != nil {
-						log.Error(err)
-						//TODO Reconnect
-					}
-
-					res := model.Price{
-						ID:       in.Price.PriceId,
-						Bid:      in.Price.Bid,
-						Ask:      in.Price.Ack,
-						Date:     time.Unix(in.Price.Date, 0),
-						Symbol:   in.Price.Symbol,
-						Currency: in.Price.Currency,
-					}
-
-					c <- res
-				}
-			}
-		}
-	}(done, ch, stream)
-
-	val := <-ch
-
-	stopLoss := &protocol.StopLossValue{
-		Value:    stoppLoss,
-		IsEnable: true,
-	}
-
-	posReq := &protocol.OpenPositionRequest{
-		Username: username,
-		Symbol:   symbol,
-		Short:    true,
-		Amount:   10,
-		PriceId:  val.ID,
-		Value:    stopLoss,
-	}
-
-	_, err = client.OpenPosition(context.Background(), posReq)
-	if err != nil {
-		log.Error(err)
-	}
-
-	getOpenReq := &protocol.GetOpenPositionsRequest{
-		Username: posReq.Username,
-	}
-	_, err = client.GetOpenPositions(done, getOpenReq)
-	if err != nil {
-		log.Error("Can't get data from postgres", err)
-	}
+	OpenPosition(done, redisClient, client, symbol, username)
 
 	c := make(chan os.Signal, 0)
 	signal.Notify(c, os.Interrupt)
