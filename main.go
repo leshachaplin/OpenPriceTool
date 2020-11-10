@@ -73,6 +73,7 @@ func OpenPosition(ctx context.Context,
 	redisCli redis.UniversalClient,
 	client protocol.TraderServiceClient,
 	symbol, username string) {
+	log.Info("OPEN SYMBOL: ", symbol)
 	price := &model.Price{}
 	key := fmt.Sprintf("%s_last", symbol)
 	result, err := redisCli.Get(key).Bytes()
@@ -115,7 +116,6 @@ func main() {
 	done, cnsl := context.WithCancel(context.Background())
 
 	username := "lesha"
-	symbol := "EURUSD"
 
 	opts := grpc.WithInsecure()
 	clientConnInterface, err := grpc.Dial("0.0.0.0:50051", opts)
@@ -146,23 +146,30 @@ func main() {
 	c := make(chan os.Signal, 0)
 	signal.Notify(c, os.Interrupt)
 
+	for i := 0; i < 5000; i++ {
+		symbol := fmt.Sprintf("EURUSD%d", i)
+		OpenPosition(done, redisClient, client, symbol, username)
+	}
+
 	<-c
 	cnsl()
 
-	for {
-		select {
-		case <-done.Done():
-			{
-				if err := redisClient.Close(); err != nil {
-					log.Errorf("redis not closed %s", err)
-				}
-
-				log.Info("Cancel is successful")
-				close(c)
-				return
-			}
-		default:
-			OpenPosition(done, redisClient, client, symbol, username)
-		}
+	if err := redisClient.Close(); err != nil {
+		log.Errorf("redis not closed %s", err)
 	}
+
+	log.Info("Cancel is successful")
+	close(c)
+	return
+
+	//for {
+	//	select {
+	//	case <-done.Done():
+	//		{
+	//
+	//		}
+	//	default:
+	//
+	//	}
+	//}
 }
