@@ -133,14 +133,8 @@ func main() {
 
 	client := protocol.NewTraderServiceClient(clientConnInterface)
 
-	// Connect to aws-ssm
-	awsConf, err := config.NewForAws("us-west-2")
-	if err != nil {
-		log.Error("Can't connect to aws: ", err)
-	}
-
 	// get redis connection url from aws parameter store
-	redisConfig, err := awsConf.GetRedis("aws-ssm-redis://Redis/")
+	redisConfig, err := config.GetRedis("redis://lesha:chaplin@localhost:6379/?isCluster=true")
 	if err != nil {
 		log.Error("Can't get redis config from aws: ", err)
 	}
@@ -153,23 +147,11 @@ func main() {
 	c := make(chan os.Signal, 0)
 	signal.Notify(c, os.Interrupt)
 
-	symbol := fmt.Sprintf("EURUSD")
-	OpenPosition(done, redisClient, client, false, symbol, username)
+	//symbol := fmt.Sprintf("EURUSD")
+	//OpenPosition(done, redisClient, client, false, symbol, username)
 
 	symbol1 := fmt.Sprintf("EURUSD0")
-	OpenPosition(done, redisClient, client, false, symbol1, username)
-
-	symbol2 := fmt.Sprintf("EURUSD1")
-	OpenPosition(done, redisClient, client, false, symbol2, username)
-
-	symbol3 := fmt.Sprintf("EURUSD2")
-	OpenPosition(done, redisClient, client, true, symbol3, username)
-
-	symbol4 := fmt.Sprintf("EURUSD3")
-	OpenPosition(done, redisClient, client, true, symbol4, username)
-
-	symbol5 := fmt.Sprintf("EURUSD4")
-	OpenPosition(done, redisClient, client, true, symbol5, username)
+	OpenPosition(done, redisClient, client, true, symbol1, username)
 
 	<-c
 	cnsl()
